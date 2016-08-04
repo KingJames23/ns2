@@ -1,0 +1,14 @@
+运行仿真界面程序：wish myGUI.tcl
+也可以直接命令行输入：sh runall.sh
+仿真界面使用：选择需要的参数后点击保存，然后点击运行程序，由于仿真时间较长，所以“运行程序”点击后界面停止响应。运行完成后将产生13个后缀为.tr的仿真数据文件，13个后缀为.nam的演示文件，nam演示命令：nam fileName。
+使用trace-mac.awk脚本分析吞吐量命令：
+gawk -f trace-mac.wak 文件名.tr > 输出文件名
+使用drop.awk脚本统计丢包命令：
+gawk -f drop.wak 文件名.tr > 输出文件名
+使用delay.awk脚本统计延时命令：
+gawk -f delay.wak 文件名.tr > 输出文件名
+使用Gunplot绘图工具可以将得到的输出进行可视化展示，由于一次性产生13个文件过多，会使图像杂乱，所以没有在界面中添加该功能。
+输入
+gnuplot -p -e "set xlabel '时间(s)';set ylabel '吞吐量(kb)'; plot '吞吐量分析输出文件名1' with lines,'吞吐量分析输出文件名2,'吞吐量分析输出文件名3' with lines" ...
+代码可以绘制对应文件的吞吐量曲线图。
+

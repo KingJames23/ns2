@@ -1,0 +1,267 @@
+http://blog.csdn.net/bennyfun79/article/details/5553274
+错误代码格式
+
+最新在研究nrlolsr协议(参照：http://cs.itd.nrl.navy.mil/work/olsr/index.php)，在运行时出现了一个错误，参照相关的资料解决了该问题，过程如下。
+
+错误代码从错误发生时开始输出，然后返回上一级调用，上一级可能继续返回错误代码的相关信息，最典型的模式是
+
+1 "eval $self create-wireless-node $args"          # 命令代码
+2   (procedure "_o3" line 23)                    # 命令所在行数
+3   (Simulator node line 23)                    # Simulator 实体的node函数体
+4     invoked from within                        #
+5 "$ns_ node"                                # 调用代码
+
+此5行大体意思是， 1行对应的命令是从句柄为 "_o3"的Simulator实体的函数 node  "函数定义"的第23行调用的
+
+句柄说明
+在每一个Simulator对应的模拟中"_o*"标示唯一的一个分裂类实体，也就是说，所有的分裂类实体都有自己的唯一标识 详见《tclcl-1.19/tcl-object.tcl 代码分析 》
+
+对于下面错误代码中提到的几个句柄说明如下：
+_o3 是一个Simulator实例句柄， _o14是一个node实例句柄，_o17是一个agent实例句柄
+
+错误例子：
+
+
+INITIALIZE THE LIST xListHead
+
+ 
+1.    (_o17 cmd line 1)
+2.    invoked from within
+3."_o17 cmd port-dmux _o26"
+4.    invoked from within
+5."catch "$self cmd $args" ret"
+6.    invoked from within
+7."if [catch "$self cmd $args" ret] {
+8.set cls [$self info class]
+9.global errorInfo
+10.set savedInfo $errorInfo
+11.error "error when calling class $cls: $args" $..."
+12.    (procedure "_o17" line 2)
+13.    (SplitObject unknown line 2)
+14.    invoked from within
+15."$agent port-dmux $dmux_"
+16.    (procedure "_o14" line 11)
+17.    (Node/MobileNode add-target-rtagent line 11)
+18.    invoked from within
+19."$self add-target-rtagent $agent $port"
+20.    (procedure "_o14" line 28)
+21.    (Node/MobileNode add-target line 28)
+22.    invoked from within
+23."$self add-target $agent $port"
+24.    (procedure "_o14" line 15)
+25.    (Node attach line 15)
+26.    invoked from within
+27."$node attach $ragent [Node set rtagent_port_]"
+28.    (procedure "_o3" line 84)
+29.    (Simulator create-wireless-node line 84)
+30.    invoked from within
+31."_o3 create-wireless-node"
+32.    ("eval" body line 1)
+33.    invoked from within
+34."eval $self create-wireless-node $args"
+35.    (procedure "_o3" line 23)
+36.    (Simulator node line 23)
+37.    invoked from within
+38."$ns_ node"
+39.    ("for" body line 2)
+40.    invoked from within
+41."for {set i 0} {$i < $val(nn) } {incr i} {
+42.                set node_($i) [$ns_ node]
+43.                $node_($i) random-motion 1
+44.                                ;# enable random motion
+45.        }"
+46.    (file "basicmhop.tcl" line 132)
+
+
+
+
+错误分析过程（自底向上）
+其实tcl中的self 相当于 C++中的this指针，了解C++的肯定知道，this指针有一个运行时的问题，"this command"可能动态调用父类< 或者子类? > 的同名command，具体的分析采用从下向上方法，如果你很熟悉ns2机制，可以越过一些，具体的分析如下：
+1.  41-44给出错误从脚本附近的代码，在一个for循环中, 38行说明"$ns_ node"是来自42行
+当在tcl脚本里调用如下：
+1 set  ns_  [new Simulator]
+2 set  node_(0)  [$ns_ node]  ;#调用了Simulator instproc node 过程
+
+//ns-2.31/tcl/lib/ns-lib.tcl  
+
+Simulator instproc node args {            // args 为域参数
+$self instvar Node_ routingAgent_ wiredRouting_ satNodeType_
+if { [Simulator info vars EnableMcast_] != "" } {
+warn "Flag variable Simulator::EnableMcast_ discontinued./n/t/
+Use multicast methods as:/n/t/t/
+% set ns /[new Simulator -multicast on]/n/t/t/
+% /$ns multicast"
+$self multicast            #$self = = "-o3"
+Simulator unset EnableMcast_
+}
+... ... ... ... ... ... ... ... ... ... ... 
+if { [info exists routingAgent_] && ($routingAgent_ != "") } {
+23        set node [eval $self create-wireless-node $args]     #$self = = "-o3" 
+#使用eval 是从tcl脚本调用Otcl对象及函数 就是"_o3 create-wireless-node"
+... ... ... ... ... ... ... ... ... ... ... 
+}
+return $node            //出口之一
+}
+
+#分析一下下句语法Node_(*)是干什么用的？
+set node [eval new [Simulator set node_factory_] $args]
+set Node_([$node id]) $node
+
+#把节点加入到Simulator的C++空间的链表中
+$self add-node $node [$node id] 
+
+#set the nodeid in c++ Node - ratul
+$node nodeid [$node id]        
+$node set ns_ $self                    //指向模拟器实例
+$self check-node-num
+return $node
+}
+2  34-37行可知，调用进入函数 $self create-wireless-node ，31-33指明了"_o3 create-wireless-node"     也就是下面函数，在此 _o3 是Simulaor的一个实体句柄
+//ns-2.31/tcl/lib/ns-lib.tcl 
+Simulator instproc create-wireless-node args {
+//omit some code here... ... ... ... ... .. .... ... ... ... ... ... ... ... ...
+Simulator set IMEPFlag_ OFF
+
+# create node instance
+set node [eval $self create-node-instance $args]
+
+... ... ... ... ... .. .... ... ... ... ... ... ... ... ...        //omit some code here
+
+# Attach agent
+if {$routingAgent_ != "DSR"} {
+$node attach $ragent [Node set rtagent_port_]
+}
+... ... ... ... ... .. .... ... ... ... ... ... ... ... ...
+
+return $node
+}
+27 "$node attach $ragent [Node set rtagent_port_]"  此时 "$ node = = _o14"
+28     (procedure "_o3" line 75)
+29     (Simulator create-wireless-node line 75)
+30     invoked from within
+31 "_o3 create-wireless-node"    
+3.  27-30 可知 $node attach $ragent [Node set rtagent_port_] 在上面函数的75行
+//ns-2.31/tcl/lib/ns-node.tcl
+Node instproc attach { agent { port "" } } {
+.......................................................
+$agent set agent_port_ $port
+15    $self  add-target $agent  $port 
+}
+
+
+
+23  "$self add-target $agent $port"    
+24     (procedure "_o14" line 15)
+25     (Node attach line 15) 
+26     invoked from within
+27 "$node attach $ragent [Node set rtagent_port_]"
+
+4.  23-25行 可知self add-target $agent $port 来自Node attach函数的15行
+
+add-target过程是在//ns-2.34/tcl/lib/ns-node.tcl中实现的，它会调用到MobileNode的add-target过程。
+
+ 
+
+
+19-23行可知 动态转向了Node/MobileNode  <-o14> 的add-target， 函数的23行,这里的node其实是一个移动节点Node/MobileNode 类型的，所以调用的是下面的函数(//ns-2.3*/tcl/lib/ns-mobilenode.tcl)
+Node/MobileNode instproc add-target { agent port } {
+$self instvar dmux_ imep_ toraDebug_ 
+set ns [Simulator instance]
+set newapi [$ns imep-support]
+$agent set sport_ $port
+... ... ... ... ... 
+if { $port == [Node set rtagent_port_] } {            
+# Ad hoc routing agent setup needs special handling
+23        $self add-target-rtagent $agent $port
+return
+}
+... ... ... ... ... 
+}
+
+19 "$self add-target-rtagent $agent $port"
+20     (procedure "_o14" line 23)
+21     (Node/MobileNode add-target line 23)
+22     invoked from within
+23  "$self add-target $agent $port"
+5. $self add-target-rtagent $agent $port 
+Node/MobileNode instproc add-target-rtagent { agent port } {
+$self instvar imep_ toraDebug_ 
+
+set ns [Simulator instance]
+set newapi [$ns imep-support]
+set namfp [$ns get-nam-traceall]
+
+set dmux_ [$self demux]
+set classifier_ [$self entry]
+
+# let the routing agent know about the port dmux
+$agent port-dmux $dmux_    
+... ... ...省略一些代码 ... ... ...
+}
+
+15 "$agent port-dmux $dmux_"
+16     (procedure "_o14" line 11)
+17     (Node/MobileNode add-target-rtagent line 11)
+18     invoked from within
+19 "$self add-target-rtagent $agent $port"
+
+6        15-19可以知调用."$agent port-dmux $dmux_" 但是agent 没有函数port-dmux ,agent 的祖先也没有次函数，所以转到 ->  nrlolsr.cpp，发现它在command函数中没有实现port-dmux $dmux。也没有定义次函数，所以问题在这里，没有相应的处理代码，这里最主要的是要学会看代码。
+
+ 
+
+ 
+
+解决方法: 依照aodv协议中进行处理，即修改nrlolsr.h/cc文件，在头文件中加入port_dmux_的定义，在nrlolsr.cpp文件中加入port_dmux的实现，重新编译即可。
+
+//nrlolsr.h中加入:
+
+        NsObject        *port_dmux_;        //my port dmux 
+
+ 
+
+//nrlolsr.cc中加入：
+
+
+
+ 
+
+NRLOLSR::NRLOLSR(nsaddr_t id) : Agent(PT_NRLOLSR),
+
+ htimer(this), ttimer(this), port_dmux_(0) {
+
+...
+
+}
+
+及：
+
+ 
+
+
+
+
+int 
+
+NRLOLSR::command(int argc, const char*const* argv) {
+
+......
+
+
+
+
+    else if(strcasecmp(argv[1], "port-dmux") == 0) {        
+
+      NsObject *obj;
+
+      port_dmux_ = (NsObject *)obj;
+
+      return TCL_OK;
+
+    }
+
+
+}
+
+ 
+
+参考：http://hi.baidu.com/ynp130y/blog/item/30755826faaef021d5074242.html
