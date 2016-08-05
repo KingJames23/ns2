@@ -8,6 +8,7 @@ for { set i 0} { $i < $opt(nodes) } {incr i} {
  	    $node_($i) random-motion 0
 
 	} else {
+ 	    $node_($i) random-motion 1
 		$node_($i) start
 	}
 }
